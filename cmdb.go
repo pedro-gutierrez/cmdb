@@ -32,6 +32,7 @@ func main() {
 	dbName := os.Getenv("CMDB_NAME")
 	archiveName := fmt.Sprintf("%s.zip", dbName)
 	port := os.Getenv("CMDB_PORT")
+	dataDir := os.Getenv("CMDB_DATA")
 
 	dbFiles := []string{
 		"data.mdb",
@@ -89,7 +90,7 @@ func main() {
 	if err != nil {
 		exitErrorf("Could not set map size: %s", err)
 	}
-	err = env.Open(".", 0, 0644)
+	err = env.Open(dataDir, 0, 0644)
 	if err != nil {
 		log.Printf("Could not open db: %s", err)
 		return
@@ -159,13 +160,14 @@ func main() {
 			t.Year(), t.Month(), t.Day(),
 			t.Hour(), t.Minute(), t.Second())
 
-		fileName := fmt.Sprintf("%s-%s", tstamp, archiveName)
-		err := archiver.Zip.Make(archiveName, dbFiles)
+		remoteFileName := fmt.Sprintf("%s-%s", tstamp, archiveName)
+		localFileName := fmt.Sprintf("%s/%s-%s", dataDir, tstamp, archiveName)
+		err := archiver.Zip.Make(localFileName, dbFiles)
 		if err != nil {
 			log.Printf("Could not create archive: %s", err)
 			return
 		}
-		file, err := os.Open(archiveName)
+		file, err := os.Open(localFileName)
 		defer file.Close()
 		if err != nil {
 			log.Printf("Unable to open file %q, %v", err)
@@ -180,11 +182,11 @@ func main() {
 		uploader := s3manager.NewUploader(sess)
 		_, err = uploader.Upload(&s3manager.UploadInput{
 			Bucket: aws.String(bucketName),
-			Key:    aws.String(fileName),
+			Key:    aws.String(remoteFileName),
 			Body:   file,
 		})
 		if err != nil {
-			log.Printf("Unable to upload %q to %q, %v", fileName, bucketName, err)
+			log.Printf("Unable to upload %q to %q, %v", localFileName, bucketName, err)
 		}
 
 		ctx.JSON(iris.Map{"name": tstamp, "size": fi.Size()})
@@ -192,9 +194,9 @@ func main() {
 	})
 	app.Post("/restore/{key:string}", func(ctx iris.Context) {
 		key := ctx.Params().Get("key")
-		fileName := fmt.Sprintf("%s-%s", key, archiveName)
-
-		file, err := os.Create(archiveName)
+		localFileName := fmt.Sprintf("%s/%s-%s", dataDir, key, archiveName)
+		remoteFileName := fmt.Sprintf("%s-%s", key, archiveName)
+		file, err := os.Create(localFileName)
 		if err != nil {
 			log.Printf("Unable to open file for writing item %q, %v", archiveName, err)
 			return
@@ -205,14 +207,14 @@ func main() {
 		bytes, err := downloader.Download(file,
 			&s3.GetObjectInput{
 				Bucket: aws.String(bucketName),
-				Key:    aws.String(fileName),
+				Key:    aws.String(remoteFileName),
 			})
 		if err != nil {
-			log.Printf("Unable to download item %q, %v", fileName, err)
+			log.Printf("Unable to download item %q, %v", remoteFileName, err)
 			return
 		}
 
-		err = archiver.Zip.Open(archiveName, ".")
+		err = archiver.Zip.Open(localFileName, dataDir)
 		if err != nil {
 			log.Printf("Unable to unarchive %s, %v", archiveName, err)
 			return
