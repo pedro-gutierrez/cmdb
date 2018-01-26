@@ -16,7 +16,7 @@ docker run
   -v "/tmp/data:/data" \ 
   -n cmdb \
   -p 7801:7801 \
-  pedro-gutierrez/cmdb:latest
+  pedrogutierrez/cmdb:latest
 ```
 
 ## Usage
