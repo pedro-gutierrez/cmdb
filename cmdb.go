@@ -35,8 +35,8 @@ func main() {
 	dataDir := os.Getenv("CMDB_DATA")
 
 	dbFiles := []string{
-		"data.mdb",
-		"lock.mdb",
+		fmt.Sprintf("%s/%s", dataDir, "data.mdb"),
+		fmt.Sprintf("%s/%s", dataDir, "lock.mdb"),
 	}
 
 	sess, err := session.NewSession(&aws.Config{
