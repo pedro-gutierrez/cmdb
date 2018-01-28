@@ -1,5 +1,10 @@
-# cmdb
-A simple KV store written in Go that uses LMDB as a backend
+# CMDB
+
+* Simple KV store 
+* JSON in, JSON out
+* Written in Go
+* LMDB backend.
+* Backup/Restore to/from S3
 
 ## Getting started 
 
@@ -24,15 +29,38 @@ docker run
 Set a value for key:
 
 ```
-$ curl -X POST http://localhost:7801/keys/foo --data "bar"
+$ curl -X POST http://localhost:7801/keys/foo --data "1"
 ```
 
-Get a key value:
+Get a single value for a key:
 
 ```
 $ curl http://localhost:7801/keys/foo
 
-bar
+1
+```
+
+Set multiple values for the same key
+
+```
+$ curl -X POST http://localhost:7801/keys/foo --data "2"
+$ curl -X POST http://localhost:7801/keys/foo --data "3"
+$ curl -X POST http://localhost:7801/keys/foo --data "4"
+
+```
+
+Get multiple values for the same key
+
+```
+$ curl http://localhost:7801/keys/foo?count=2
+
+[1,2]
+```
+
+```
+$ curl http://localhost:7801/keys/foo?count=2&skip=2
+
+[3,4]
 ```
 
 Do a backup to S3:

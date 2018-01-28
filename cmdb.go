@@ -24,6 +24,26 @@ func exitErrorf(msg string, args ...interface{}) {
 	os.Exit(1)
 }
 
+func parseJson(v []byte) interface{} {
+	var f interface{}
+	if err := json.Unmarshal(v, &f); err != nil {
+		return nil
+	} else {
+		return f
+	}
+}
+
+func toInt(v string, defValue int, errValue int) int {
+	if len(v) == 0 {
+		return defValue
+	}
+	v2, err := strconv.Atoi(v)
+	if err != nil {
+		return errValue
+	}
+	return v2
+}
+
 func main() {
 
 	region := os.Getenv("AWS_REGION")
@@ -42,19 +62,6 @@ func main() {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region)})
 	svc := s3.New(sess)
-
-	resp, err := svc.ListObjects(&s3.ListObjectsInput{Bucket: aws.String(bucketName)})
-	if err != nil {
-		exitErrorf("Unable to list items in bucket %q, %v", "in-fullpass-backups", err)
-	}
-
-	for _, item := range resp.Contents {
-		fmt.Println("Name:         ", *item.Key)
-		fmt.Println("Last modified:", *item.LastModified)
-		fmt.Println("Size:         ", *item.Size)
-		fmt.Println("Storage class:", *item.StorageClass)
-		fmt.Println("")
-	}
 
 	result, err := svc.ListBuckets(&s3.ListBucketsInput{})
 	if err != nil {
@@ -118,33 +125,100 @@ func main() {
 
 	app.Get("/keys/{key:string}", func(ctx iris.Context) {
 		key := ctx.Params().Get("key")
-		err = env.View(func(txn *lmdb.Txn) (err error) {
-			v, err := txn.Get(dbi, []byte(key))
-			if err != nil {
-				return err
+		skip := toInt(ctx.FormValue("skip"), 0, -1)
+		count := toInt(ctx.FormValue("count"), 0, -1)
+
+		if skip == -1 || count == -1 {
+			ctx.StatusCode(iris.StatusBadRequest)
+			return
+		}
+
+		err := env.View(func(txn *lmdb.Txn) (err error) {
+			if count > 0 {
+				cur, err := txn.OpenCursor(dbi)
+				if err != nil {
+					return err
+				}
+				_, v, err := cur.Get([]byte(key), nil, lmdb.Set)
+				if err != nil {
+					return err
+				}
+
+				ctx.Write([]byte("["))
+
+				firstWritten := false
+
+				if skip == 0 {
+					ctx.Write(v)
+					firstWritten = true
+				}
+
+				read := 1
+				for {
+
+					if read == count {
+						break
+					}
+					_, v, err = cur.Get(nil, nil, lmdb.NextDup)
+					if lmdb.IsNotFound(err) {
+						break
+					} else if err != nil {
+						return err
+					} else {
+						if read >= skip {
+							if firstWritten == true {
+								ctx.Write([]byte(","))
+							} else {
+								firstWritten = true
+							}
+							ctx.Write(v)
+
+						}
+					}
+
+					read++
+				}
+
+				ctx.Write([]byte("]"))
+				ctx.ContentType("application/json")
+
+			} else {
+				v, err := txn.Get(dbi, []byte(key))
+				if err != nil {
+					return err
+				}
+				ctx.ContentType("application/json")
+				ctx.Write(v)
 			}
-			ctx.Write(v)
+
 			return nil
 		})
 
 		if err != nil {
-			log.Print("error: %s", err)
-			ctx.Text("not_found")
+			if lmdb.IsNotFound(err) {
+				ctx.StatusCode(iris.StatusNotFound)
+			} else {
+				log.Fatal("error: %s", err)
+				ctx.StatusCode(iris.StatusInternalServerError)
+
+			}
 		}
 	})
 	app.Post("/keys/{key:string}", func(ctx iris.Context) {
 		key := ctx.Params().Get("key")
 		body, _ := ioutil.ReadAll(ctx.Request().Body)
-		err = env.Update(func(txn *lmdb.Txn) (err error) {
-			err = txn.Put(dbi, []byte(key), body, 0)
-			return err
-		})
-		if err != nil {
-			log.Print("error: %s", err)
-			ctx.Write(body)
+		if parseJson(body) == nil {
+			ctx.StatusCode(iris.StatusBadRequest)
+			return
 		}
-		ctx.Write([]byte("{}"))
+		env.Update(func(txn *lmdb.Txn) (err error) {
+			return txn.Put(dbi, []byte(key), body, 0)
+		})
 
+		if err != nil {
+			log.Fatal("Can't write: %s", err)
+			ctx.StatusCode(iris.StatusInternalServerError)
+		}
 	})
 
 	type Place struct {
@@ -197,11 +271,12 @@ func main() {
 		localFileName := fmt.Sprintf("%s/%s-%s", dataDir, key, archiveName)
 		remoteFileName := fmt.Sprintf("%s-%s", key, archiveName)
 		file, err := os.Create(localFileName)
+		defer file.Close()
 		if err != nil {
-			log.Printf("Unable to open file for writing item %q, %v", archiveName, err)
+			log.Fatal("Unable to open file for writing item %q, %v", archiveName, err)
+			ctx.StatusCode(iris.StatusInternalServerError)
 			return
 		}
-		defer file.Close()
 
 		downloader := s3manager.NewDownloader(sess)
 		bytes, err := downloader.Download(file,
