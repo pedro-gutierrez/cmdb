@@ -14,10 +14,10 @@ import "encoding/csv"
 import "encoding/json"
 import "bufio"
 import "io"
-import "strings"
 import "fmt"
 import "strconv"
 import "time"
+import "strings"
 
 func exitErrorf(msg string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, msg+"\n", args...)
@@ -42,6 +42,18 @@ func toInt(v string, defValue int, errValue int) int {
 		return errValue
 	}
 	return v2
+}
+
+func toFloat(v string, defValue float64, errValue float64) float64 {
+	if len(v) == 0 {
+		return defValue
+	}
+	v2, err := strconv.ParseFloat(v, 32)
+	if err != nil {
+		return errValue
+	}
+	return v2
+
 }
 
 func main() {
@@ -224,8 +236,18 @@ func main() {
 	type Place struct {
 		City    string
 		Country string
-		Lat     string
-		Lon     string
+		Lat     float32
+		Lon     float32
+	}
+
+	type Coords struct {
+		Lat float32
+		Lon float32
+	}
+
+	type LoadResult struct {
+		read    int
+		written int
 	}
 
 	app.Post("/backups", func(ctx iris.Context) {
@@ -302,6 +324,8 @@ func main() {
 		reader := csv.NewReader(bufio.NewReader(csvFile))
 		reader.LazyQuotes = true
 		reader.Read()
+		read := 1
+		written := 0
 		for {
 			line, err := reader.Read()
 			if err == io.EOF {
@@ -309,24 +333,66 @@ func main() {
 			} else if err != nil {
 				log.Fatal("error reading line: %s", err)
 			} else {
-				k := strings.Join([]string{line[5], line[6]}, "-")
-				v := Place{line[2], line[2], line[5], line[6]}
-				b, err := json.Marshal(v)
+				lat := float32(toFloat(line[5], 0, 0))
+				lon := float32(toFloat(line[6], 0, 0))
+				coord := Coords{lat, lon}
+				k, err := json.Marshal(coord)
 				if err != nil {
 					log.Print("error serializing json: %s", err)
 				} else {
-					err := env.Update(func(txn *lmdb.Txn) (err error) {
-						err = txn.Put(dbi, []byte(k), b, 0)
-						return err
-					})
+					kBytes := []byte(k)
+					tokens := strings.Split(line[1], " ")
+
+					v := Place{line[2], line[0], lat, lon}
+					place, err := json.Marshal(v)
 					if err != nil {
-						log.Printf("error writing: %s", err)
+						log.Print("error serializing json: %s", err)
 					} else {
-						//log.Print("written: ", k)
+						err := env.Update(func(txn *lmdb.Txn) (err error) {
+							err = txn.Put(dbi, kBytes, place, 0)
+							if err != nil {
+								return err
+							} else {
+								//log.Printf("Written %s => %s", kBytes, place)
+								written++
+								for _, t := range tokens {
+									tokens2 := strings.Split(t, "-")
+									for _, t2 := range tokens2 {
+										if len(t2) > 0 {
+											err = txn.Put(dbi, []byte(t2), kBytes, 0)
+											if err != nil {
+												log.Printf("Error while writing %s", t2)
+											} else {
+												written++
+												if written%1000 == 0 {
+													log.Printf("Written %s keys", written)
+												}
+
+												//log.Printf("Written %s => %s", t2, kBytes)
+											}
+										} else {
+											//log.Print("Skipping empty key")
+										}
+									}
+								}
+								return nil
+							}
+
+						})
+
+						if err != nil {
+							log.Printf("error writing: %s", err)
+						}
 					}
+
 				}
 			}
+
+			read++
 		}
+
+		ctx.ContentType("application/json")
+		ctx.JSON(iris.Map{"read": read, "written": written})
 	})
 
 	app.Run(iris.Addr(fmt.Sprintf(":%s", port)))
