@@ -164,6 +164,7 @@ func main() {
 					return err
 				}
 
+				ctx.ContentType("application/json")
 				ctx.Write([]byte("["))
 
 				firstWritten := false
@@ -200,7 +201,6 @@ func main() {
 				}
 
 				ctx.Write([]byte("]"))
-				ctx.ContentType("application/json")
 
 			} else {
 				v, err := txn.Get(dbi, []byte(key))
@@ -251,6 +251,8 @@ func main() {
 		if err != nil {
 			log.Fatal("Can't write: %s", err)
 			ctx.StatusCode(iris.StatusInternalServerError)
+		} else {
+			ctx.ContentType("application/json")
 		}
 	})
 
