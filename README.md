@@ -29,13 +29,13 @@ docker run
 Set a value for key:
 
 ```
-$ curl -X POST http://localhost:7801/keys/foo --data "1"
+$ curl -X POST http://localhost:7801/foo --data "1"
 ```
 
 Get a single value for a key:
 
 ```
-$ curl http://localhost:7801/keys/foo
+$ curl http://localhost:7801/foo
 
 1
 ```
@@ -43,9 +43,9 @@ $ curl http://localhost:7801/keys/foo
 Set multiple values for the same key
 
 ```
-$ curl -X POST http://localhost:7801/keys/foo --data "2"
-$ curl -X POST http://localhost:7801/keys/foo --data "3"
-$ curl -X POST http://localhost:7801/keys/foo --data "4"
+$ curl -X POST http://localhost:7801/foo --data "2"
+$ curl -X POST http://localhost:7801/foo --data "3"
+$ curl -X POST http://localhost:7801/foo --data "4"
 
 ```
 
@@ -63,10 +63,30 @@ $ curl http://localhost:7801/keys/foo?count=2&skip=2
 [3,4]
 ```
 
+Unique keys:
+
+```
+$ curl -X POST -i http://localhost:7801/bar?unique=true --data "1"
+
+HTTP/1.1 200 OK
+Date: Mon, 29 Jan 2018 18:43:29 GMT
+Content-Length: 0
+Content-Type: text/plain; charset=utf-8
+
+$ curl -X POST -i http://localhost:7801/bar?unique=true --data "2"
+
+HTTP/1.1 409 Conflict
+Date: Mon, 29 Jan 2018 18:44:09 GMT
+Content-Length: 8
+Content-Type: text/plain; charset=utf-8
+
+Conflict
+```
+
 Do a backup to S3:
 
 ```
-$ curl -X POST http://localhost:7801/backups
+$ curl -X POST http://localhost:7801/backups/new
 
 {"name":"20180126174859","size":502}
 ```
@@ -74,7 +94,7 @@ $ curl -X POST http://localhost:7801/backups
 Restore a backup from S3:
 
 ```
-$ curl -X POST http://localhost:7801/restore/20180126174859
+$ curl -X POST http://localhost:7801/backups/20180126174859/restore
 
 { "size": 502}
 ```

@@ -56,6 +56,14 @@ func toFloat(v string, defValue float64, errValue float64) float64 {
 
 }
 
+func toBool(v string, defValue bool) bool {
+	if len(v) == 0 {
+		return defValue
+	} else {
+		return "true" == strings.ToLower(v)
+	}
+}
+
 func main() {
 
 	region := os.Getenv("AWS_REGION")
@@ -135,7 +143,7 @@ func main() {
 
 	app := iris.Default()
 
-	app.Get("/keys/{key:string}", func(ctx iris.Context) {
+	app.Get("/{key:string}", func(ctx iris.Context) {
 		key := ctx.Params().Get("key")
 		skip := toInt(ctx.FormValue("skip"), 0, -1)
 		count := toInt(ctx.FormValue("count"), 0, -1)
@@ -212,19 +220,32 @@ func main() {
 			} else {
 				log.Fatal("error: %s", err)
 				ctx.StatusCode(iris.StatusInternalServerError)
-
 			}
 		}
 	})
-	app.Post("/keys/{key:string}", func(ctx iris.Context) {
+	app.Post("/{key:string}", func(ctx iris.Context) {
 		key := ctx.Params().Get("key")
 		body, _ := ioutil.ReadAll(ctx.Request().Body)
 		if parseJson(body) == nil {
 			ctx.StatusCode(iris.StatusBadRequest)
 			return
 		}
-		env.Update(func(txn *lmdb.Txn) (err error) {
-			return txn.Put(dbi, []byte(key), body, 0)
+
+		unique := toBool(ctx.FormValue("unique"), false)
+
+		err := env.Update(func(txn *lmdb.Txn) (err error) {
+			if unique {
+				err := txn.Put(dbi, []byte(key), body, lmdb.NoOverwrite)
+				if err != nil {
+					log.Printf("error: %s", err)
+					ctx.StatusCode(iris.StatusConflict)
+					return nil
+				} else {
+					return err
+				}
+			} else {
+				return txn.Put(dbi, []byte(key), body, 0)
+			}
 		})
 
 		if err != nil {
@@ -250,11 +271,11 @@ func main() {
 		written int
 	}
 
-	app.Post("/backups", func(ctx iris.Context) {
+	app.Post("/backups/new", func(ctx iris.Context) {
 		t := time.Now()
 		tstamp := fmt.Sprintf("%d%02d%02d%02d%02d%02d",
 			t.Year(), t.Month(), t.Day(),
-			t.Hour(), t.Minute(), t.Second())
+			t.Hour(), t.Minute(), tNoOverwrite)
 
 		remoteFileName := fmt.Sprintf("%s-%s", tstamp, archiveName)
 		localFileName := fmt.Sprintf("%s/%s-%s", dataDir, tstamp, archiveName)
@@ -288,7 +309,7 @@ func main() {
 		ctx.JSON(iris.Map{"name": tstamp, "size": fi.Size()})
 
 	})
-	app.Post("/restore/{key:string}", func(ctx iris.Context) {
+	app.Post("/backups/{key:string}/restore", func(ctx iris.Context) {
 		key := ctx.Params().Get("key")
 		localFileName := fmt.Sprintf("%s/%s-%s", dataDir, key, archiveName)
 		remoteFileName := fmt.Sprintf("%s-%s", key, archiveName)
@@ -333,22 +354,24 @@ func main() {
 			} else if err != nil {
 				log.Fatal("error reading line: %s", err)
 			} else {
+
 				lat := float32(toFloat(line[5], 0, 0))
 				lon := float32(toFloat(line[6], 0, 0))
-				coord := Coords{lat, lon}
+				coord := []float32{lat, lon}
 				k, err := json.Marshal(coord)
+
 				if err != nil {
 					log.Print("error serializing json: %s", err)
 				} else {
 					kBytes := []byte(k)
 					tokens := strings.Split(line[1], " ")
-
 					v := Place{line[2], line[0], lat, lon}
 					place, err := json.Marshal(v)
 					if err != nil {
 						log.Print("error serializing json: %s", err)
 					} else {
 						err := env.Update(func(txn *lmdb.Txn) (err error) {
+
 							err = txn.Put(dbi, kBytes, place, 0)
 							if err != nil {
 								return err
@@ -383,8 +406,8 @@ func main() {
 						if err != nil {
 							log.Printf("error writing: %s", err)
 						}
-					}
 
+					}
 				}
 			}
 
