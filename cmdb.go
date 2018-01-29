@@ -275,7 +275,7 @@ func main() {
 		t := time.Now()
 		tstamp := fmt.Sprintf("%d%02d%02d%02d%02d%02d",
 			t.Year(), t.Month(), t.Day(),
-			t.Hour(), t.Minute(), tNoOverwrite)
+			t.Hour(), t.Minute(), t.Second())
 
 		remoteFileName := fmt.Sprintf("%s-%s", tstamp, archiveName)
 		localFileName := fmt.Sprintf("%s/%s-%s", dataDir, tstamp, archiveName)
